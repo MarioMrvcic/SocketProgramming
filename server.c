@@ -176,13 +176,13 @@ void *handle_TCP_connection(void *arg) {
     pthread_exit(NULL);
 }
 
-// Listening for TCP connections
+// Listen for TCP connections
 void *listen_for_TCP_connections(void *arg){    
 
     // Dereference the argument to get the socket descriptor
     int TCP_socket = *(int *)arg;
 
-    // Keeping track of active threads
+    // Keep track of active threads
     pthread_t TCP_threads[MAX_TCP_THREAD_COUNT];
     int TCP_thread_id = 0;
 
@@ -191,7 +191,7 @@ void *listen_for_TCP_connections(void *arg){
     struct sockaddr_in incoming_addr;
     socklen_t incoming_addr_len = sizeof(incoming_addr);
 
-    // Listening for incoming connections
+    // Listen for incoming connections
     if (listen(TCP_socket, BACKLOG) < 0) {
         perror("Listen failed");
         close(TCP_socket);
@@ -205,7 +205,7 @@ void *listen_for_TCP_connections(void *arg){
             continue;
         }
 
-        // Allocate memory for struct because of potential race Condition and initialize all variables that will be passed to the new thread
+        // Allocate memory for struct because of potential race conditions and asign all variables that will be passed to the new thread
         struct data_to_handle_TCP *handle_TCP_data = malloc(sizeof(struct data_to_handle_TCP));
         if (handle_TCP_data == NULL) {
             perror("Failed to allocate memory");
@@ -226,7 +226,7 @@ void *listen_for_TCP_connections(void *arg){
     }
 }
 
-// Function to handle commands from stdin
+// Handle fetched stdin commands
 void handle_stdin_command(char *stdin_command){
 
     // Remove trailing newline character
@@ -243,7 +243,6 @@ void handle_stdin_command(char *stdin_command){
 
     } else if (strncmp(stdin_command, "SET ", 4) == 0) {
         char current_payload[MAX_MESSAGE_SIZE];
-        // Locking the mutex for synchronisation issues and checking the current payload
         pthread_mutex_lock(&mutex);
         strcpy(payload, strdup(stdin_command + 4));
         strcpy(current_payload, payload);
@@ -259,6 +258,7 @@ void handle_stdin_command(char *stdin_command){
 }
 
 int main(int argc, char *argv[]) {
+    // Options for running program initialization
     int opt;
     static struct option long_options[] = {
         {"help",no_argument,0,'h'},
@@ -268,8 +268,10 @@ int main(int argc, char *argv[]) {
         {0,0,0,0}
     };
     int long_index = 0;
+    // Ports
     int TCP_port = 1234, UDP_port = 1234;
 
+    // Input options setup
     while ((opt = getopt_long(argc, argv, "ht:u:p:", long_options, &long_index)) != -1) {
         switch (opt) {
             case 'h':
@@ -292,6 +294,7 @@ int main(int argc, char *argv[]) {
         }
     }   
 
+    // Start message
     printf("--Server started--\n");
     printf("Payload: %s\n", payload);
     printf("TCP_Port: %d\n", TCP_port);
@@ -300,7 +303,7 @@ int main(int argc, char *argv[]) {
     // Initialize mutex
     pthread_mutex_init(&mutex, NULL);
 
-    // Create UDP and TCP socket
+    // UDP and TCP socket creation
     int UDP_sockfd, TCP_sockfd;
     if ((UDP_sockfd = socket(AF_INET, SOCK_DGRAM, 0)) < 0) {
         perror("UDP_Socket creation failed");
@@ -311,15 +314,16 @@ int main(int argc, char *argv[]) {
         return 1;
     }
 
+    // Sockaddr_in structure initialization for UDP and TCP
     struct sockaddr_in myaddr_UDP,myaddr_TCP;
-    // Seting up the UDP and TCP address structure
     myaddr_UDP.sin_family = AF_INET;
     myaddr_UDP.sin_port = htons(UDP_port);
     myaddr_UDP.sin_addr.s_addr = INADDR_ANY;
     myaddr_TCP.sin_family = AF_INET;
     myaddr_TCP.sin_port = htons(TCP_port);
     myaddr_TCP.sin_addr.s_addr = INADDR_ANY;
-    // Binding the UDP and TCP socket to the specified address and port
+    
+    // UDP and TCP socket bind to the specified address and port
     if (bind(UDP_sockfd, (struct sockaddr *)&myaddr_UDP, sizeof(myaddr_UDP)) < 0) {
         perror("UDP bind failed");
         close(UDP_sockfd);
@@ -331,27 +335,27 @@ int main(int argc, char *argv[]) {
         exit(EXIT_FAILURE);
     }
 
-    // Creating new thread IDs for registration and UDP
-    pthread_t registration_thread, UDP_thread, TCP_thread;
+    // New thread IDs for UDP and TCP
+    pthread_t UDP_thread, TCP_thread;
 
-    // Assign thread to listen for UDP and TCP messages
+    // Thread creation that will listen for UDP messages and TCP connections
     if (pthread_create(&UDP_thread, NULL, listen_for_UDP_message, (void *)&UDP_sockfd) != 0) {
         perror("Failed to create UDP_thread");
         return 1;
     }
-    if (pthread_create(&UDP_thread, NULL, listen_for_TCP_connections, (void *)&TCP_sockfd) != 0) {
+    if (pthread_create(&TCP_thread, NULL, listen_for_TCP_connections, (void *)&TCP_sockfd) != 0) {
         perror("Failed to create UDP_thread");
         return 1;
     }
 
+    // Fetching commands from stdin
     char stdin_command[MAX_COMMAND_SIZE];
     while(true){
         fgets(stdin_command, MAX_COMMAND_SIZE, stdin);
         handle_stdin_command(stdin_command);
     }
 
-    // Program finish
-    pthread_join(registration_thread, NULL);
+    // Program finish (just for safety, the program should not reach this far usually)
     pthread_join(UDP_thread, NULL);
     pthread_join(TCP_thread, NULL);
 
