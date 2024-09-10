@@ -1,1 +1,1 @@
-Project as part of the course "Network Programming".
+Simple example of a botnet structure.
